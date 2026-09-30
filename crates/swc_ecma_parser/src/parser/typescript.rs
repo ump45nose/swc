@@ -1096,6 +1096,12 @@ impl<I: Tokens> Parser<I> {
         ret
     }
 
+    /// Type arguments may start with adjacent opening angles after
+    /// tokenization.
+    fn is_ts_type_args_start(&self) -> bool {
+        matches!(self.input().cur(), Token::Lt | Token::LShift)
+    }
+
     /// Parses a complete type argument list, including its closing `>`.
     /// The following token is read in the caller's lexical context.
     pub(crate) fn parse_ts_type_args(&mut self) -> PResult<Box<TsTypeParamInstantiation>> {
@@ -1184,7 +1190,7 @@ impl<I: Tokens> Parser<I> {
         }
         trace_cur!(self, parse_ts_type_ref__type_args);
         let type_params = if (self.syntax().flow() || !self.input().had_line_break_before_cur())
-            && (self.input().is(Token::Lt) || self.input().is(Token::LShift))
+            && self.is_ts_type_args_start()
         {
             Some(self.parse_ts_type_args()?)
         } else {
@@ -4172,7 +4178,7 @@ impl<I: Tokens> Parser<I> {
             None
         };
 
-        let type_args = if self.input().is(Token::Lt) {
+        let type_args = if self.is_ts_type_args_start() {
             Some(self.parse_ts_type_args()?)
         } else {
             None
@@ -4227,7 +4233,8 @@ impl<I: Tokens> Parser<I> {
             self.parse_ts_entity_name(true).map(From::from)?
         };
 
-        let type_args = if !self.input().had_line_break_before_cur() && self.input().is(Token::Lt) {
+        let type_args = if !self.input().had_line_break_before_cur() && self.is_ts_type_args_start()
+        {
             Some(self.parse_ts_type_args()?)
         } else {
             None
