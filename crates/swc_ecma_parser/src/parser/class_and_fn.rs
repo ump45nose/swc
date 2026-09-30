@@ -950,7 +950,16 @@ impl<I: Tokens> Parser<I> {
                     BoundaryContext::InStaticBlock
                 };
                 let value = p.without_async_arrow_param_await_collection(|p| {
-                    p.with_await_expr(false, |p| {
+                    // FieldDefinition still passes the enclosing Yield/Await flags in
+                    // the specification. Follow V8, SpiderMonkey, and fixed JSC instead:
+                    // an initializer has its own non-generator, non-async function
+                    // boundary. Computed names were parsed before this boundary.
+                    // The normative grammar is disputed; do not treat this reset as
+                    // an unambiguous specification requirement.
+                    // https://tc39.es/ecma262/#prod-FieldDefinition
+                    // https://github.com/tc39/ecma262/issues/2437
+                    // https://github.com/tc39/ecma262/issues/3333
+                    p.with_function_grammar(false, false, |p| {
                         p.do_outside_of_boundary_context(reset_context, |p| {
                             p.with_syntax_context(SyntaxContext::Nested, |p| {
                                 if p.input().is(Token::Eq) {
@@ -1089,8 +1098,17 @@ impl<I: Tokens> Parser<I> {
             BoundaryContext::InStaticBlock | BoundaryContext::InClassField,
             |p| {
                 p.do_inside_of_statement_context(StatementContext::AllowUsingDecl, |p| {
-                    p.do_outside_of_grammar_context(GrammarContext::Return, |p| {
-                        p.with_syntax_context(SyntaxContext::Nested, |p| p.parse_block(false))
+                    // Static blocks have StatementList[~Yield, +Await, ~Return].
+                    // Await is recognized, but rejected by the static-block early error.
+                    // https://tc39.es/ecma262/#prod-ClassStaticBlockStatementList
+                    p.with_function_grammar(false, true, |p| {
+                        p.allow_in_expr(|p| {
+                            p.do_outside_of_grammar_context(GrammarContext::Return, |p| {
+                                p.with_syntax_context(SyntaxContext::Nested, |p| {
+                                    p.parse_block(false)
+                                })
+                            })
+                        })
                     })
                 })
             },

@@ -2336,16 +2336,18 @@ impl<I: Tokens> Parser<I> {
         let ctx = self.ctx();
         let boundary_context = self.boundary_ctx();
 
-        if self.syntax_context != SyntaxContext::FunctionBody
+        let forbidden_in_initializer = self.syntax_context != SyntaxContext::FunctionBody
             && boundary_context
-                .intersects(BoundaryContext::InClassField | BoundaryContext::InStaticBlock)
-        {
+                .intersects(BoundaryContext::InClassField | BoundaryContext::InStaticBlock);
+        if forbidden_in_initializer {
             self.emit_err(await_token, SyntaxError::ExpectedIdent);
         }
 
         let span = self.span(start);
 
-        if !self.includes_await_expr()
+        // A forbidden await with no operand recovers as an identifier. Its early
+        // error was already emitted, even when this region has the Await flag.
+        if (!self.includes_await_expr() || forbidden_in_initializer)
             && (self.is_general_semi() || {
                 let cur = self.input().cur();
                 matches!(
