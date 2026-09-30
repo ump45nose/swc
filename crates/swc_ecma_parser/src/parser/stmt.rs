@@ -67,7 +67,8 @@ impl<I: Tokens> Parser<I> {
         let test = if self.input_mut().eat(Token::Semi) {
             None
         } else {
-            let test = self.allow_in_expr(|p| p.parse_expr()).map(Some)?;
+            let test =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr()).map(Some)?;
             self.input_mut().eat(Token::Semi);
             test
         };
@@ -75,7 +76,7 @@ impl<I: Tokens> Parser<I> {
         let update = if self.input().is(Token::RParen) {
             None
         } else {
-            self.allow_in_expr(|p| p.parse_expr()).map(Some)?
+            with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr()).map(Some)?
         };
 
         Ok(TempForHead::For { init, test, update })
@@ -85,13 +86,14 @@ impl<I: Tokens> Parser<I> {
         let is_of = self.input().cur() == Token::Of;
         self.bump();
         if is_of {
-            let right = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let right =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
             Ok(TempForHead::ForOf { left, right })
         } else {
             if let ForHead::UsingDecl(d) = &left {
                 self.emit_err(d.span, SyntaxError::UsingDeclNotAllowedForForInLoop)
             }
-            let right = self.allow_in_expr(|p| p.parse_expr())?;
+            let right = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
             Ok(TempForHead::ForIn { left, right })
         }
     }
@@ -103,7 +105,7 @@ impl<I: Tokens> Parser<I> {
         let arg = if self.is_general_semi() {
             None
         } else {
-            self.allow_in_expr(|p| p.parse_expr()).map(Some)?
+            with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr()).map(Some)?
         };
         self.expect_general_semi()?;
         let stmt = Ok(ReturnStmt {
@@ -281,7 +283,7 @@ impl<I: Tokens> Parser<I> {
             }
 
             let decl = if should_include_in {
-                self.allow_in_expr(|p| p.parse_var_declarator(for_loop, kind))
+                with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_var_declarator(for_loop, kind))
             } else {
                 self.parse_var_declarator(for_loop, kind)
             }?;
@@ -457,7 +459,7 @@ impl<I: Tokens> Parser<I> {
         }
 
         let start = self.cur_pos();
-        let init = self.disallow_in_expr(Self::parse_for_head_prefix)?;
+        let init = with_grammar_context!(self, [~In, ?Yield, ?Await], Self::parse_for_head_prefix)?;
 
         let mut is_using_decl = false;
         let mut is_await_using_decl = false;
@@ -654,9 +656,10 @@ impl<I: Tokens> Parser<I> {
         expect!(self, Token::LParen);
 
         let test = self
-            .do_outside_of_statement_context(StatementContext::IgnoreElseClause, |p| {
-                p.allow_in_expr(|p| p.parse_expr())
-            })
+            .do_outside_of_statement_context(
+                StatementContext::IgnoreElseClause,
+                |p| with_grammar_context!(p, [+In, ?Yield, ?Await], |p| p.parse_expr()),
+            )
             .map_err(|err| {
                 Error::new(
                     err.span(),
@@ -762,7 +765,7 @@ impl<I: Tokens> Parser<I> {
             syntax_error!(self, SyntaxError::LineBreakInThrow);
         }
 
-        let arg = self.allow_in_expr(|p| p.parse_expr())?;
+        let arg = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
         self.expect_general_semi()?;
 
         let span = self.span(start);
@@ -785,7 +788,7 @@ impl<I: Tokens> Parser<I> {
         self.assert_and_bump(Token::With);
 
         expect!(self, Token::LParen);
-        let obj = self.allow_in_expr(|p| p.parse_expr())?;
+        let obj = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
         expect!(self, Token::RParen);
 
         let body = self
@@ -802,7 +805,7 @@ impl<I: Tokens> Parser<I> {
         self.assert_and_bump(Token::While);
 
         expect!(self, Token::LParen);
-        let test = self.allow_in_expr(|p| p.parse_expr())?;
+        let test = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
         expect!(self, Token::RParen);
 
         let body = self
@@ -866,7 +869,7 @@ impl<I: Tokens> Parser<I> {
         expect!(self, Token::While);
         expect!(self, Token::LParen);
 
-        let test = self.allow_in_expr(|p| p.parse_expr())?;
+        let test = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
 
         expect!(self, Token::RParen);
 
@@ -1005,7 +1008,7 @@ impl<I: Tokens> Parser<I> {
         self.assert_and_bump(Token::Switch);
 
         expect!(self, Token::LParen);
-        let discriminant = self.allow_in_expr(|p| p.parse_expr())?;
+        let discriminant = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
         expect!(self, Token::RParen);
 
         let mut cases = Vec::new();
@@ -1023,7 +1026,7 @@ impl<I: Tokens> Parser<I> {
                 let case_start = p.cur_pos();
                 p.bump();
                 let test = if is_case {
-                    p.allow_in_expr(|p| p.parse_expr()).map(Some)?
+                    with_grammar_context!(p, [+In, ?Yield, ?Await], |p| p.parse_expr()).map(Some)?
                 } else {
                     if let Some(previous) = span_of_previous_default {
                         syntax_error!(p, SyntaxError::MultipleDefault { previous });
@@ -1405,7 +1408,7 @@ impl<I: Tokens> Parser<I> {
             }
 
             if self.input_mut().eat(Token::LBracket) {
-                let prop_expr = self.allow_in_expr(Self::parse_assignment_expr)?;
+                let prop_expr = with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
                 expect!(self, Token::RBracket);
                 expr = Box::new(Expr::Member(MemberExpr {
                     span: self.span(start),
@@ -1745,13 +1748,14 @@ impl<I: Tokens> Parser<I> {
         while !self.input().is(Token::RBrace) {
             let pattern = self.flow_match_parse_pattern()?;
             let guard = if self.input_mut().eat(Token::If) {
-                Some(self.allow_in_expr(|p| p.parse_expr())?)
+                Some(with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?)
             } else {
                 None
             };
             self.flow_match_expect_case_separator()?;
 
-            let body = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let body =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
             let lowered = self.flow_match_lower_pattern(span, temp_expr.clone(), &pattern);
             let mut test = lowered.predicate;
             if let Some(guard) = guard {
@@ -1799,7 +1803,7 @@ impl<I: Tokens> Parser<I> {
         while !self.input().is(Token::RBrace) {
             let pattern = self.flow_match_parse_pattern()?;
             let guard = if self.input_mut().eat(Token::If) {
-                Some(self.allow_in_expr(|p| p.parse_expr())?)
+                Some(with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?)
             } else {
                 None
             };
@@ -1809,7 +1813,7 @@ impl<I: Tokens> Parser<I> {
                 self.parse_block(false)?
             } else {
                 self.emit_err(self.input().cur_span(), SyntaxError::TS1003);
-                let expr = self.allow_in_expr(Self::parse_assignment_expr)?;
+                let expr = with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
                 BlockStmt {
                     span,
                     stmts: vec![Stmt::Expr(ExprStmt { span, expr })],
@@ -1978,7 +1982,7 @@ impl<I: Tokens> Parser<I> {
                 }
 
                 let expr = self.parse_await_expr(eaten_await)?;
-                let expr = self.allow_in_expr(|p| p.parse_bin_op_recursively(expr, 0))?;
+                let expr = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_bin_op_recursively(expr, 0))?;
                 self.eat_general_semi();
 
                 let span = self.span(start);
@@ -2152,7 +2156,7 @@ impl<I: Tokens> Parser<I> {
         // next token is a colon and the expression was a simple
         // Identifier node, we switch to interpreting it as a label.
         let expr_token = self.input().cur();
-        let expr = self.allow_in_expr(|p| p.parse_expr())?;
+        let expr = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
 
         let expr = match *expr {
             Expr::Ident(ident) => {

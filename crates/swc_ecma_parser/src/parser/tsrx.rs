@@ -428,11 +428,15 @@ impl<I: Tokens> Parser<I> {
                         unexpected!(self, "`key` after `index` in a TSRX @for header")
                     }
                     self.bump();
-                    key = Some(self.allow_in_expr(Self::parse_assignment_expr)?);
+                    key = Some(
+                        with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?,
+                    );
                 }
             } else if self.is_contextual_word("key") {
                 self.bump();
-                key = Some(self.allow_in_expr(Self::parse_assignment_expr)?);
+                key = Some(
+                    with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?,
+                );
             } else {
                 unexpected!(self, "`index` or `key` in a TSRX @for header")
             }

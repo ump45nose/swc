@@ -171,9 +171,11 @@ impl<I: Tokens> Parser<I> {
     }
 
     fn parse_imported_binding(&mut self) -> PResult<Ident> {
-        Ok(self
-            .with_function_grammar(false, false, |p| p.parse_binding_ident(false))?
-            .into())
+        // ImportedBinding : BindingIdentifier[~Yield, ~Await].
+        let binding = with_grammar_context!(self, [~Yield, ~Await], |p| {
+            p.parse_binding_ident(false)
+        })?;
+        Ok(binding.into())
     }
 
     fn parse_imported_default_binding(&mut self) -> PResult<Ident> {
@@ -633,7 +635,7 @@ impl<I: Tokens> Parser<I> {
                     self.input().prev_span(),
                 ))
             } else {
-                let expr = self.allow_in_expr(Self::parse_assignment_expr)?;
+                let expr = with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
                 self.expect_general_semi()?;
                 return Ok(ExportDefaultExpr {
                     span: self.span(start),

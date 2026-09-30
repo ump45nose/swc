@@ -395,7 +395,7 @@ impl<I: Tokens> Parser<I> {
 
         let lexical_context = self.ctx() - Context::Module;
         self.input_mut().set_ctx(lexical_context);
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, ~Return);
         self.set_boundary_ctx(self.boundary_ctx() | BoundaryContext::TopLevel);
 
         let start = self.cur_pos();
@@ -424,7 +424,7 @@ impl<I: Tokens> Parser<I> {
         // CommonJS module is acctually in a function scope
         let lexical_context = self.ctx() - Context::Module;
         self.input_mut().set_ctx(lexical_context);
-        self.set_grammar_ctx(self.grammar_ctx() | GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, +Return);
         self.syntax_context = SyntaxContext::FunctionBody;
         self.set_boundary_ctx(self.boundary_ctx() | BoundaryContext::InsideNonArrowFunctionScope);
 
@@ -456,7 +456,7 @@ impl<I: Tokens> Parser<I> {
         let ctx = (self.ctx() | Context::Module) - Context::Strict;
         // Module code is always in strict mode
         self.input_mut().set_ctx(ctx);
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, ~Return);
         self.set_boundary_ctx(self.boundary_ctx() | BoundaryContext::TopLevel);
 
         let start = self.cur_pos();
@@ -597,7 +597,7 @@ impl<I: Tokens> Parser<I> {
                     (self.boundary_ctx() - BoundaryContext::CanBeModule)
                         | BoundaryContext::TopLevel,
                 );
-                self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Await);
+                enter_grammar_context!(&mut self.grammar_context, ?Yield, ~Await, ?Return);
 
                 let requires_module_ast = body
                     .iter()
@@ -640,7 +640,7 @@ impl<I: Tokens> Parser<I> {
         self.enter_program_syntax_context();
         let lexical_context = self.ctx() - Context::Module;
         self.input_mut().set_ctx(lexical_context);
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, ~Return);
         self.set_boundary_ctx(
             self.boundary_ctx() | BoundaryContext::CanBeModule | BoundaryContext::TopLevel,
         );
@@ -652,11 +652,11 @@ impl<I: Tokens> Parser<I> {
         self.enter_program_syntax_context();
         let lexical_context = self.ctx() - Context::Module;
         self.input_mut().set_ctx(lexical_context);
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, ~Return);
         self.set_boundary_ctx(
             (self.boundary_ctx() - BoundaryContext::CanBeModule) | BoundaryContext::TopLevel,
         );
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Await);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ~Await, ?Return);
         self.program_parse_mode = ProgramParseMode::Script;
         self.ambiguous_script_different_ast = false;
     }
@@ -710,7 +710,7 @@ impl<I: Tokens> Parser<I> {
         let ctx = self.ctx() | Context::Module | Context::Strict;
         // Module code is always in strict mode
         self.input_mut().set_ctx(ctx);
-        self.set_grammar_ctx(self.grammar_ctx() - GrammarContext::Return);
+        enter_grammar_context!(&mut self.grammar_context, ?Yield, ?Await, ~Return);
         self.set_boundary_ctx(
             self.boundary_ctx() | BoundaryContext::CanBeModule | BoundaryContext::TopLevel,
         );
@@ -829,27 +829,16 @@ impl<I: Tokens> Parser<I> {
         self.type_context = type_context;
     }
 
+    /// Runs with derived grammatical parameters, restoring them on success or
+    /// error.
     #[inline]
-    fn do_inside_of_grammar_context<T>(
+    fn with_grammar_context<T>(
         &mut self,
         context: GrammarContext,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let grammar_context = self.grammar_ctx();
-        self.set_grammar_ctx(grammar_context | context);
-        let result = f(self);
-        self.set_grammar_ctx(grammar_context);
-        result
-    }
-
-    #[inline]
-    fn do_outside_of_grammar_context<T>(
-        &mut self,
-        context: GrammarContext,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let grammar_context = self.grammar_ctx();
-        self.set_grammar_ctx(grammar_context - context);
+        self.set_grammar_ctx(context);
         let result = f(self);
         self.set_grammar_ctx(grammar_context);
         result
@@ -972,41 +961,6 @@ impl<I: Tokens> Parser<I> {
     }
 
     #[inline]
-    fn with_yield_expr<T>(&mut self, include: bool, f: impl FnOnce(&mut Self) -> T) -> T {
-        if include {
-            self.do_inside_of_grammar_context(GrammarContext::Yield, f)
-        } else {
-            self.do_outside_of_grammar_context(GrammarContext::Yield, f)
-        }
-    }
-
-    #[inline]
-    fn with_await_expr<T>(&mut self, include: bool, f: impl FnOnce(&mut Self) -> T) -> T {
-        if include {
-            self.do_inside_of_grammar_context(GrammarContext::Await, f)
-        } else {
-            self.do_outside_of_grammar_context(GrammarContext::Await, f)
-        }
-    }
-
-    #[inline]
-    fn with_function_grammar<T>(
-        &mut self,
-        include_yield: bool,
-        include_await: bool,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let grammar_context = self.grammar_ctx();
-        let mut function_context = grammar_context;
-        function_context.set(GrammarContext::Yield, include_yield);
-        function_context.set(GrammarContext::Await, include_await);
-        self.set_grammar_ctx(function_context);
-        let result = f(self);
-        self.set_grammar_ctx(grammar_context);
-        result
-    }
-
-    #[inline]
     pub fn do_inside_of_context<T>(
         &mut self,
         context: Context,
@@ -1048,16 +1002,6 @@ impl<I: Tokens> Parser<I> {
         let result = f(self);
         self.type_context.set(TypeContext::InType, previous);
         result
-    }
-
-    #[inline(always)]
-    pub fn allow_in_expr<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        self.do_inside_of_grammar_context(GrammarContext::In, f)
-    }
-
-    #[inline(always)]
-    pub fn disallow_in_expr<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        self.do_outside_of_grammar_context(GrammarContext::In, f)
     }
 
     #[inline(always)]
@@ -1480,12 +1424,13 @@ impl<I: Tokens> Parser<I> {
         } else if cur == Token::LBracket {
             self.bump();
             let inner_start = self.input().cur_pos();
-            let mut expr = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let mut expr =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
             if self.syntax().typescript() && self.input().is(Token::Comma) {
                 let mut exprs = vec![expr];
                 while self.input_mut().eat(Token::Comma) {
                     //
-                    exprs.push(self.allow_in_expr(Self::parse_assignment_expr)?);
+                    exprs.push(with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?);
                 }
                 self.emit_err(self.span(inner_start), SyntaxError::TS1171);
                 expr = Box::new(

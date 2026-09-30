@@ -9,9 +9,7 @@ use crate::{
     error::SyntaxError,
     input::Tokens,
     lexer::Token,
-    parser::{
-        util::IsSimpleParameterList, BoundaryContext, FunctionKind, GrammarContext, TypeContext,
-    },
+    parser::{util::IsSimpleParameterList, BoundaryContext, FunctionKind, TypeContext},
     Context, PResult, Parser,
 };
 
@@ -1584,7 +1582,7 @@ impl<I: Tokens> Parser<I> {
 
                 if p.input_mut().eat(Token::LParen) {
                     if !p.input().is(Token::RParen) {
-                        p.allow_in_expr(Self::parse_assignment_expr)?;
+                        with_grammar_context!(p, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
                     }
                     expect!(p, Token::RParen);
                 }
@@ -4258,7 +4256,7 @@ impl<I: Tokens> Parser<I> {
         let outer_ctx = self.ctx();
         let body = self.do_inside_of_type_context(TypeContext::TsModuleBlock, |p| {
             p.do_outside_of_boundary_context(BoundaryContext::TopLevel, |p| {
-                p.do_outside_of_grammar_context(GrammarContext::Return, |p| {
+                with_grammar_context!(p, [?Yield, ?Await, ~Return], |p| {
                     p.with_syntax_context(super::SyntaxContext::Nested, |p| {
                         p.parse_module_item_block_body(false, Some(Token::RBrace))
                     })
@@ -5242,26 +5240,25 @@ impl<I: Tokens> Parser<I> {
             None => return Ok(None),
         };
 
-        self.with_await_expr(true, |p| {
-            p.with_yield_expr(false, |p| {
-                let is_generator = false;
-                let is_async = true;
-                p.record_await_in_arrow_params(&params);
-                let body = p.parse_fn_block_or_expr_body(
-                    FunctionKind::Arrow { is_async: true },
-                    params.is_simple_parameter_list(),
-                )?;
-                Ok(Some(ArrowExpr {
-                    span: p.span(start),
-                    body,
-                    is_async,
-                    is_generator,
-                    type_params: Some(type_params),
-                    params,
-                    return_type,
-                    ..Default::default()
-                }))
-            })
+        // AsyncConciseBody[?In] derives ExpressionBody[?In, +Await].
+        with_grammar_context!(self, [?In, ~Yield, +Await], |p| {
+            let is_generator = false;
+            let is_async = true;
+            p.record_await_in_arrow_params(&params);
+            let body = p.parse_fn_block_or_expr_body(
+                FunctionKind::Arrow { is_async: true },
+                params.is_simple_parameter_list(),
+            )?;
+            Ok(Some(ArrowExpr {
+                span: p.span(start),
+                body,
+                is_async,
+                is_generator,
+                type_params: Some(type_params),
+                params,
+                return_type,
+                ..Default::default()
+            }))
         })
     }
 }

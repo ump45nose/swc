@@ -11,8 +11,7 @@ use crate::{
     parser::{
         state::State,
         util::{is_ts_ambient_initializer, IsInvalidClassName, IsSimpleParameterList},
-        BoundaryContext, FunctionKind, GrammarContext, StatementContext, SyntaxContext,
-        TypeContext,
+        BoundaryContext, FunctionKind, StatementContext, SyntaxContext, TypeContext,
     },
     PResult, Parser,
 };
@@ -73,7 +72,7 @@ fn parse_ts_this_param<I: Tokens>(p: &mut Parser<I>) -> PResult<Option<Box<TsThi
             };
             p.emit_err(p.input().prev_span(), error);
         }
-        p.allow_in_expr(|p| p.parse_assignment_expr())?;
+        with_grammar_context!(p, [+In, ?Yield, ?Await], |p| p.parse_assignment_expr())?;
     }
 
     if !p.input().is(Token::RParen) {
@@ -337,7 +336,7 @@ impl<I: Tokens> Parser<I> {
 
         if self.input_mut().eat(Token::LParen) {
             if !self.input().is(Token::RParen) {
-                self.allow_in_expr(Self::parse_assignment_expr)?;
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
             }
             expect!(self, Token::RParen);
         }
@@ -377,27 +376,15 @@ impl<I: Tokens> Parser<I> {
 
             expect!(p, Token::LParen);
 
-            let parse_args_with_generator_ctx = |p: &mut Self| {
-                let parse_this_and_args = |p: &mut Self| {
-                    let this_param = parse_ts_this_param(p)?;
-                    parse_args(p).map(|params| (this_param, params))
-                };
-
-                if is_generator {
-                    p.with_yield_expr(true, parse_this_and_args)
-                } else {
-                    p.with_yield_expr(false, parse_this_and_args)
-                }
-            };
-
             let (this_param, params) = p.without_async_arrow_param_await_collection(|p| {
                 p.do_inside_of_boundary_context(BoundaryContext::InParameters, |p| {
                     p.with_syntax_context(SyntaxContext::Parameters, |p| {
-                        if is_async {
-                            p.with_await_expr(true, parse_args_with_generator_ctx)
-                        } else {
-                            p.with_await_expr(false, parse_args_with_generator_ctx)
-                        }
+                        // FormalParameters use the function kind's derived arguments;
+                        // their FormalParameter children inherit both parameters.
+                        with_grammar_context!(p, [?Yield, ?Await], |p| {
+                            let this_param = parse_ts_this_param(p)?;
+                            parse_args(p).map(|params| (this_param, params))
+                        })
                     })
                 })
             })?;
@@ -470,21 +457,15 @@ impl<I: Tokens> Parser<I> {
             }))
         };
 
-        let f_with_generator_ctx = |p: &mut Self| {
-            if is_generator {
-                p.with_yield_expr(true, f)
-            } else {
-                p.with_yield_expr(false, f)
-            }
-        };
-
         // Ordinary functions and methods establish their own Await grammar
         // parameter, including their parameter lists, inside static blocks.
         self.do_outside_of_boundary_context(BoundaryContext::InStaticBlock, |p| {
-            if is_async {
-                p.with_await_expr(true, f_with_generator_ctx)
-            } else {
-                p.with_await_expr(false, f_with_generator_ctx)
+            // Function, generator, async-function, and async-generator parameters.
+            match (is_generator, is_async) {
+                (false, false) => with_grammar_context!(p, [~Yield, ~Await], f),
+                (true, false) => with_grammar_context!(p, [+Yield, ~Await], f),
+                (false, true) => with_grammar_context!(p, [~Yield, +Await], f),
+                (true, true) => with_grammar_context!(p, [+Yield, +Await], f),
             }
         })
     }
@@ -543,27 +524,20 @@ impl<I: Tokens> Parser<I> {
         let is_generator = self.input_mut().eat(Token::Asterisk);
 
         let ident = if is_fn_expr {
-            let f_with_generator_context = |p: &mut Self| {
-                if is_generator {
-                    p.with_yield_expr(true, |p| {
-                        p.parse_maybe_opt_function_ident(is_ident_required)
-                    })
-                } else {
-                    p.with_yield_expr(false, |p| {
-                        p.parse_maybe_opt_function_ident(is_ident_required)
-                    })
-                }
-            };
-
             self.do_outside_of_boundary_context(
                 BoundaryContext::AllowDirectSuper
                     | BoundaryContext::InClassField
                     | BoundaryContext::InStaticBlock,
                 |p| {
-                    if is_async {
-                        p.with_await_expr(true, f_with_generator_context)
-                    } else {
-                        p.with_await_expr(false, f_with_generator_context)
+                    // Expression names use the function kind's BindingIdentifier
+                    // arguments; declaration names inherit the enclosing grammar.
+                    let parse_name =
+                        |p: &mut Self| p.parse_maybe_opt_function_ident(is_ident_required);
+                    match (is_generator, is_async) {
+                        (false, false) => with_grammar_context!(p, [~Yield, ~Await], parse_name),
+                        (true, false) => with_grammar_context!(p, [+Yield, ~Await], parse_name),
+                        (false, true) => with_grammar_context!(p, [~Yield, +Await], parse_name),
+                        (true, true) => with_grammar_context!(p, [+Yield, +Await], parse_name),
                     }
                 },
             )?
@@ -571,7 +545,11 @@ impl<I: Tokens> Parser<I> {
             // function declaration does not change context for `BindingIdentifier`.
             self.do_outside_of_boundary_context(
                 BoundaryContext::AllowDirectSuper.union(BoundaryContext::InClassField),
-                |p| p.parse_maybe_opt_function_ident(is_ident_required),
+                |p| {
+                    with_grammar_context!(p, [?Yield, ?Await], |p| {
+                        p.parse_maybe_opt_function_ident(is_ident_required)
+                    })
+                },
             )?
         };
 
@@ -819,7 +797,7 @@ impl<I: Tokens> Parser<I> {
             }
         };
 
-        self.do_inside_of_grammar_context(GrammarContext::Return, |p| {
+        with_grammar_context!(self, [?Yield, ?Await, +Return], |p| {
             p.with_syntax_context(SyntaxContext::FunctionBody, |p| {
                 p.do_outside_of_boundary_context(
                     BoundaryContext::InStaticBlock | BoundaryContext::TopLevel,
@@ -827,11 +805,21 @@ impl<I: Tokens> Parser<I> {
                         p.do_outside_of_statement_context(
                             StatementContext::IsBreakAllowed | StatementContext::IsContinueAllowed,
                             |p| {
-                                p.with_function_grammar(
-                                    kind.is_generator(),
-                                    kind.is_async(),
-                                    f_with_function_scope,
-                                )
+                                // FunctionBody arguments selected by the enclosing production.
+                                match (kind.is_generator(), kind.is_async()) {
+                                    (false, false) => with_grammar_context!(
+                                        p, [~Yield, ~Await], f_with_function_scope
+                                    ),
+                                    (true, false) => with_grammar_context!(
+                                        p, [+Yield, ~Await], f_with_function_scope
+                                    ),
+                                    (false, true) => with_grammar_context!(
+                                        p, [~Yield, +Await], f_with_function_scope
+                                    ),
+                                    (true, true) => with_grammar_context!(
+                                        p, [+Yield, +Await], f_with_function_scope
+                                    ),
+                                }
                             },
                         )
                     },
@@ -877,14 +865,15 @@ impl<I: Tokens> Parser<I> {
                 {
                     return Ok(None);
                 }
-                p.allow_in_expr(|p| p.parse_block(true)).map(|block_stmt| {
-                    if !is_simple_parameter_list {
-                        if let Some(span) = has_use_strict(&block_stmt) {
-                            p.emit_err(span, SyntaxError::IllegalLanguageModeDirective);
+                with_grammar_context!(p, [+In, ?Yield, ?Await, ?Return], |p| p.parse_block(true))
+                    .map(|block_stmt| {
+                        if !is_simple_parameter_list {
+                            if let Some(span) = has_use_strict(&block_stmt) {
+                                p.emit_err(span, SyntaxError::IllegalLanguageModeDirective);
+                            }
                         }
-                    }
-                    Some(function_body_from_block_stmt(block_stmt))
-                })
+                        Some(function_body_from_block_stmt(block_stmt))
+                    })
             },
         )
     }
@@ -941,7 +930,7 @@ impl<I: Tokens> Parser<I> {
         let type_ann = self.try_parse_ts_type_ann()?;
 
         self.do_inside_of_boundary_context(BoundaryContext::InClassField, |p| {
-            p.allow_in_expr(|p| {
+            with_grammar_context!(p, [+In, ?Yield, ?Await], |p| {
                 // Instance field initializers do not inherit a static block's Await
                 // restriction. All fields clear the Program probe's async context.
                 let reset_context = if is_static {
@@ -959,7 +948,7 @@ impl<I: Tokens> Parser<I> {
                     // https://tc39.es/ecma262/#prod-FieldDefinition
                     // https://github.com/tc39/ecma262/issues/2437
                     // https://github.com/tc39/ecma262/issues/3333
-                    p.with_function_grammar(false, false, |p| {
+                    with_grammar_context!(p, [+In, ~Yield, ~Await], |p| {
                         p.do_outside_of_boundary_context(reset_context, |p| {
                             p.with_syntax_context(SyntaxContext::Nested, |p| {
                                 if p.input().is(Token::Eq) {
@@ -1101,13 +1090,9 @@ impl<I: Tokens> Parser<I> {
                     // Static blocks have StatementList[~Yield, +Await, ~Return].
                     // Await is recognized, but rejected by the static-block early error.
                     // https://tc39.es/ecma262/#prod-ClassStaticBlockStatementList
-                    p.with_function_grammar(false, true, |p| {
-                        p.allow_in_expr(|p| {
-                            p.do_outside_of_grammar_context(GrammarContext::Return, |p| {
-                                p.with_syntax_context(SyntaxContext::Nested, |p| {
-                                    p.parse_block(false)
-                                })
-                            })
+                    with_grammar_context!(p, [+In, ~Yield, +Await, ~Return], |p| {
+                        p.with_syntax_context(SyntaxContext::Nested, |p| {
+                            p.parse_block(false)
                         })
                     })
                 })
@@ -1403,7 +1388,7 @@ impl<I: Tokens> Parser<I> {
                 let ctor_sig_and_body = self.do_outside_of_boundary_context(
                     BoundaryContext::InClassField | BoundaryContext::InStaticBlock,
                     |p| {
-                        p.with_function_grammar(false, false, |p| {
+                        with_grammar_context!(p, [~Yield, ~Await], |p| {
                             expect!(p, Token::LParen);
                             let params = p.without_async_arrow_param_await_collection(
                                 Self::parse_constructor_params,

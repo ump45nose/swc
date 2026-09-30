@@ -539,7 +539,8 @@ impl<I: Tokens> Parser<I> {
         if self.input_mut().eat(Token::Eq) {
             let initializer_span = self.input().prev_span();
 
-            let right = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let right =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
 
             if self.boundary_ctx().contains(BoundaryContext::InParameters)
                 && self.includes_await_expr()

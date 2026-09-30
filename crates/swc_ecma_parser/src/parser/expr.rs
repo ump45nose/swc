@@ -97,7 +97,7 @@ impl<I: Tokens> Parser<I> {
             let start = self.input().prev_span().lo;
             let spread_span = self.span(start);
             let spread = Some(spread_span);
-            self.allow_in_expr(Self::parse_assignment_expr)
+            with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)
                 .map_err(|err| {
                     Error::new(
                         err.span(),
@@ -637,7 +637,10 @@ impl<I: Tokens> Parser<I> {
                 continue;
             }
 
-            elems.push(self.allow_in_expr(|p| p.parse_expr_or_spread()).map(Some)?);
+            elems.push(
+                with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr_or_spread())
+                    .map(Some)?,
+            );
 
             if !self.input().is(Token::RBracket) {
                 expect!(self, Token::Comma);
@@ -734,7 +737,7 @@ impl<I: Tokens> Parser<I> {
         let mut quasis = vec![cur_elem];
 
         while !is_tail {
-            exprs.push(self.allow_in_expr(|p| p.parse_expr())?);
+            exprs.push(with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?);
             let elem = self.parse_tpl_element(is_tagged_tpl)?;
             is_tail = elem.tail;
             quasis.push(elem);
@@ -1074,7 +1077,7 @@ impl<I: Tokens> Parser<I> {
 
         // Arguments use +In for the whole list, independently of the enclosing
         // expression.
-        self.allow_in_expr(|p| {
+        with_grammar_context!(self, [+In, ?Yield, ?Await], |p| {
             p.do_outside_of_type_context(TypeContext::WillExpectColonForCond, |p| {
                 let start = p.cur_pos();
                 expect!(p, Token::LParen);
@@ -1182,10 +1185,10 @@ impl<I: Tokens> Parser<I> {
 
         if self.input_mut().eat(Token::QuestionMark) {
             let start = test.span_lo();
-            let cons = self
-                .do_inside_of_type_context(TypeContext::WillExpectColonForCond, |p| {
-                    p.allow_in_expr(Self::parse_assignment_expr)
-                })?;
+            let cons = self.do_inside_of_type_context(
+                TypeContext::WillExpectColonForCond,
+                |p| with_grammar_context!(p, [+In, ?Yield, ?Await], Self::parse_assignment_expr),
+            )?;
 
             expect!(self, Token::Colon);
 
@@ -1413,7 +1416,7 @@ impl<I: Tokens> Parser<I> {
         // $obj[name()]
         if !NO_COMPUTED && self.input_mut().eat(Token::LBracket) {
             let bracket_lo = self.input().prev_span().lo;
-            let prop = self.allow_in_expr(|p| p.parse_expr())?;
+            let prop = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
             expect!(self, Token::RBracket);
             let span = Span::new_with_checked(callee.span_lo(), self.input().last_pos());
             debug_assert_eq!(callee.span_lo(), span.lo());
@@ -1632,7 +1635,7 @@ impl<I: Tokens> Parser<I> {
         if !NO_COMPUTED && cur == Token::LBracket {
             self.bump();
             let bracket_lo = self.input().prev_span().lo;
-            let prop = self.allow_in_expr(|p| p.parse_expr())?;
+            let prop = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
             expect!(self, Token::RBracket);
             let span = Span::new_with_checked(callee.span_lo(), self.input().last_pos());
             debug_assert_eq!(callee.span_lo(), span.lo());
@@ -1748,7 +1751,7 @@ impl<I: Tokens> Parser<I> {
             Token::LBracket => {
                 self.bump();
                 let bracket_lo = self.input().prev_span().lo;
-                let prop = self.allow_in_expr(|p| p.parse_expr())?;
+                let prop = with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr())?;
                 expect!(self, Token::RBracket);
                 let span = Span::new_with_checked(lhs.span_lo(), self.input().last_pos());
                 debug_assert_eq!(lhs.span_lo(), span.lo());
@@ -2490,7 +2493,7 @@ impl<I: Tokens> Parser<I> {
 
                     ExprOrSpread { spread, expr }
                 } else {
-                    self.allow_in_expr(|p| p.parse_expr_or_spread())?
+                    with_grammar_context!(self, [+In, ?Yield, ?Await], |p| p.parse_expr_or_spread())?
                 }
             };
 
@@ -2523,7 +2526,7 @@ impl<I: Tokens> Parser<I> {
 
                         let cons = self.do_inside_of_type_context(
                             TypeContext::WillExpectColonForCond,
-                            |p| p.allow_in_expr(Self::parse_assignment_expr),
+                            |p| with_grammar_context!(p, [+In, ?Yield, ?Await], Self::parse_assignment_expr),
                         )?;
                         expect!(self, Token::Colon);
 
@@ -2755,10 +2758,10 @@ impl<I: Tokens> Parser<I> {
             self.state_mut().collect_async_arrow_param_await = true;
             (was_collecting, previous_pending)
         });
-        let paren_result = self
-            .do_outside_of_type_context(TypeContext::WillExpectColonForCond, |p| {
-                p.allow_in_expr(Self::parse_args_or_pats)
-            });
+        let paren_result = self.do_outside_of_type_context(
+            TypeContext::WillExpectColonForCond,
+            |p| with_grammar_context!(p, [+In, ?Yield, ?Await], Self::parse_args_or_pats),
+        );
         let pending_await = collection_checkpoint.map(|(was_collecting, previous_pending)| {
             let pending = self.state_mut().pending_async_arrow_param_await.take();
             self.state_mut().collect_async_arrow_param_await = was_collecting;

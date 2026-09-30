@@ -83,7 +83,8 @@ impl<I: Tokens> Parser<I> {
             self.emit_error(error);
         }
         let value = if self.input_mut().eat(Token::Eq) {
-            self.allow_in_expr(Self::parse_assignment_expr).map(Some)?
+            with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)
+                .map(Some)?
         } else {
             let ctx = self.ctx();
             if self.word_is_reserved(&key.sym) {
@@ -197,7 +198,8 @@ impl<I: Tokens> Parser<I> {
             // spread element
             let dot3_token = self.span(start);
 
-            let expr = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let expr =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
 
             return Ok(PropOrSpread::Spread(SpreadElement { dot3_token, expr }));
         }
@@ -266,7 +268,8 @@ impl<I: Tokens> Parser<I> {
         // { 0: 1, }
         // { a: expr, }
         if self.input_mut().eat(Token::Colon) {
-            let value = self.allow_in_expr(Self::parse_assignment_expr)?;
+            let value =
+                with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
             return Ok(PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
                 key,
                 value,
@@ -359,7 +362,7 @@ impl<I: Tokens> Parser<I> {
             }
 
             if self.input_mut().eat(Token::Eq) {
-                let value = self.allow_in_expr(Self::parse_assignment_expr)?;
+                let value = with_grammar_context!(self, [+In, ?Yield, ?Await], Self::parse_assignment_expr)?;
                 let span = self.span(start);
                 return Ok(PropOrSpread::Prop(Box::new(Prop::Assign(AssignProp {
                     span,
