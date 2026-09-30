@@ -16,26 +16,6 @@ pub(crate) enum AssignTargetOrSpread {
     Pat(Pat),
 }
 
-impl AssignTargetOrSpread {
-    /// Classifies a cover-grammar parameter without consuming its expression.
-    /// Type wrappers are stripped by binding-pattern conversion as well.
-    fn is_simple_parameter(&self) -> bool {
-        let mut expr = match self {
-            Self::Pat(pat) => return matches!(pat, Pat::Ident(_)),
-            Self::ExprOrSpread(ExprOrSpread { spread: None, expr }) => &**expr,
-            Self::ExprOrSpread(_) => return false,
-        };
-        loop {
-            expr = match expr {
-                Expr::TsAs(TsAsExpr { expr, .. })
-                | Expr::TsTypeAssertion(TsTypeAssertion { expr, .. })
-                | Expr::TsSatisfies(TsSatisfiesExpr { expr, .. }) => expr,
-                _ => return matches!(expr, Expr::Ident(_)),
-            };
-        }
-    }
-}
-
 fn await_binding_span(pat: &Pat) -> Option<Span> {
     match pat {
         Pat::Ident(BindingIdent { id, .. }) if id.sym == *"await" => Some(id.span),
@@ -2796,7 +2776,7 @@ impl<I: Tokens> Parser<I> {
         // to distinguish a return annotation from the conditional's colon.
         if self.syntax().typescript() && will_expect_colon_for_cond && self.input().is(Token::Colon)
         {
-            if let Some((return_type, body)) = self.try_parse_ts(|p| {
+            if let Some((params, return_type, body)) = self.try_parse_ts(|p| {
                 let return_type = if p.input().syntax().flow() {
                     p.do_inside_of_type_context(TypeContext::DisallowFlowAnonFnType, |p| {
                         p.parse_ts_type_or_type_predicate_ann(Token::Colon)
@@ -2807,14 +2787,14 @@ impl<I: Tokens> Parser<I> {
 
                 expect!(p, Token::Arrow);
 
-                let is_simple = paren_items
-                    .iter()
-                    .all(AssignTargetOrSpread::is_simple_parameter);
+                // Conversion can fail and consumes its AST. Keep the original
+                // cover expressions available for the conditional fallback.
+                let params = p.parse_paren_items_as_params(paren_items.clone(), trailing_comma)?;
                 let body: Box<ArrowFunctionBody> = p.parse_fn_block_or_expr_body(
                     FunctionKind::Arrow {
                         is_async: async_span.is_some(),
                     },
-                    is_simple,
+                    params.is_simple_parameter_list(),
                 )?;
 
                 if !p.input().is(Token::Colon) {
@@ -2822,11 +2802,8 @@ impl<I: Tokens> Parser<I> {
                     unexpected!(p, "fail")
                 }
 
-                Ok(Some((return_type, body)))
+                Ok(Some((params, return_type, body)))
             }) {
-                // The tail has committed to an arrow. Until this point the
-                // original expressions remain available for a failed speculation.
-                let params = self.parse_paren_items_as_params(paren_items, trailing_comma)?;
                 self.record_await_in_arrow_params(&params);
                 self.emit_pending_async_arrow_param_await(pending_await);
                 return Ok(ArrowExpr {
