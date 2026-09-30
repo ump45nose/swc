@@ -1,18 +1,18 @@
 ---
+swc: patch
 swc_core: major
 swc_ecma_parser: major
 swc_ecma_quote_macros: major
 ---
 
-refactor(es/parser): Separate parser contexts and streamline parameter construction.
+refactor(es/parser): Isolate parser state and make grammar parameters explicit.
 
-Separate grammatical parameters from lexical and parser control-flow state, model statement and function boundaries explicitly, and decouple type grammar from angle-operator tokenization. Share parameter parsing and validation, and reduce unnecessary speculation and allocation in parsing and identifier scanning.
+Separate lexical, grammar, boundary, statement, and type state; make grammar transitions explicit with `+ / ~ / ?` and isolate class-initializer grammar. Decouple type grammar from angle tokenization, unify parameter parsing and validation, and reduce speculation and identifier-scanning allocations.
 
-Breaking changes to the public Rust parser API:
+Breaking Rust API changes (also through `swc_core::ecma::parser`):
 
-- `Context` now contains only lexical flags and uses `u8` instead of `u32`. Parser-only flags have been removed.
-- Use `Parser::allow_module_syntax()` instead of setting `Context::CanBeModule`.
-- Custom `Tokens` implementations must implement `rescan_type_gt`.
-- `Buffer::merge_lt_gt` has been removed. Type-closing angles are now consumed through `Buffer::eat_type_gt`, which is not a drop-in replacement.
+- `Context` becomes lexical-only (`u32` → `u8`); replace `Context::CanBeModule` with `Parser::allow_module_syntax()`.
+- Remove `Parser::{allow_in_expr, disallow_in_expr}` and `Buffer::merge_lt_gt`; use `Buffer::eat_type_gt` for type-closing angles (not a drop-in replacement).
+- Custom `Tokens` implementations must provide `rescan_type_gt`.
 
-These API changes also apply through `swc_core::ecma::parser`. AST node definitions and serialization schemas remain unchanged.
+AST definitions and serialization schemas are unchanged.
