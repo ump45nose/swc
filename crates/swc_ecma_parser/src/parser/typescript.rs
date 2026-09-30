@@ -4255,6 +4255,7 @@ impl<I: Tokens> Parser<I> {
 
         let start = self.cur_pos();
         expect!(self, Token::LBrace);
+        let outer_ctx = self.ctx();
         let body = self.do_inside_of_type_context(TypeContext::TsModuleBlock, |p| {
             p.do_outside_of_boundary_context(BoundaryContext::TopLevel, |p| {
                 p.do_outside_of_grammar_context(GrammarContext::Return, |p| {
@@ -4263,7 +4264,15 @@ impl<I: Tokens> Parser<I> {
                     })
                 })
             })
-        })?;
+        });
+        // Imports may enable Module/Strict inside this declaration container.
+        // Restore before consuming `}`: advancing also lexes the outer token.
+        self.set_ctx(outer_ctx);
+        let body = body?;
+        // The body parser already reports an unterminated container at EOF.
+        if self.input().cur() != Token::Eof {
+            expect!(self, Token::RBrace);
+        }
 
         Ok(TsModuleBlock {
             span: self.span(start),

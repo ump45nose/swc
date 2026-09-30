@@ -17,6 +17,8 @@ impl<I: Tokens> Parser<I> {
         })
     }
 
+    /// Leaves a closing delimiter buffered so the container owns its
+    /// consumption.
     pub(crate) fn parse_module_item_block_body(
         &mut self,
         allow_directives: bool,

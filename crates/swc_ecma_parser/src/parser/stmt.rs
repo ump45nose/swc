@@ -2228,14 +2228,21 @@ impl<I: Tokens> Parser<I> {
         allow_directives: bool,
         end: Option<Token>,
     ) -> PResult<Vec<Stmt>> {
-        self.parse_block_body(
+        let stmts = self.parse_block_body(
             StatementGrammar::StatementListItem,
             allow_directives,
             end,
             handle_import_export,
-        )
+        )?;
+        if self.input().cur() != Token::Eof && end.is_some() {
+            self.bump();
+        }
+        Ok(stmts)
     }
 
+    /// Parses a body without consuming its closing delimiter. The caller can
+    /// restore the enclosing lexical context before reading the following
+    /// token.
     pub(super) fn parse_block_body<Type: From<Stmt>>(
         &mut self,
         grammar: StatementGrammar,
@@ -2291,10 +2298,6 @@ impl<I: Tokens> Parser<I> {
         } else {
             parse_stmts(self, &mut stmts)?;
         };
-
-        if self.input().cur() != Token::Eof && end.is_some() {
-            self.bump();
-        }
 
         Ok(stmts)
     }
