@@ -66,7 +66,7 @@ impl<I: Tokens> Parser<I> {
             }));
         }
 
-        let escaped_keyword_error = self.input().escaped_keyword_error();
+        let escaped_keyword_error = self.escaped_keyword_error();
         let key = self.parse_prop_name()?;
         if self.input_mut().eat(Token::Colon) {
             let value = Box::new(self.parse_binding_element()?);
@@ -229,7 +229,7 @@ impl<I: Tokens> Parser<I> {
         let modifiers_span = self.input().prev_span();
 
         let key_token = self.input().cur();
-        let escaped_keyword_error = self.input().escaped_keyword_error();
+        let escaped_keyword_error = self.escaped_keyword_error();
         let key = self.parse_prop_name()?;
 
         let cur = self.input().cur();

@@ -9,7 +9,7 @@ use swc_ecma_ast::*;
 use crate::{
     error::SyntaxError,
     input::Buffer,
-    lexer::{Token, TokenAndSpan},
+    lexer::{Token, TokenAndSpan, TokenValue},
     parser::{
         input::Tokens,
         state::{State, WithState},
@@ -1102,6 +1102,23 @@ impl<I: Tokens> Parser<I> {
         }
     }
 
+    /// Captures an escape diagnostic before an IdentifierName's role is known.
+    /// Contextual keywords depend on parser grammar, not just lexical state.
+    /// Read the buffered token value: lexer flags may describe lookahead
+    /// instead.
+    fn escaped_keyword_error(&self) -> Option<Error> {
+        if !self.input().has_escaped_keyword() || !self.token_is_reserved(self.input().cur()) {
+            return None;
+        }
+        let Some(TokenValue::Word(word)) = self.input().get_token_value() else {
+            return None;
+        };
+        Some(Error::new(
+            self.input().cur_span(),
+            SyntaxError::EscapeInReservedWord { word: word.clone() },
+        ))
+    }
+
     fn check_current_token_escape(&mut self) -> PResult<()> {
         let token = self.input().cur();
         // Buffer validates the other keywords when they are consumed. Only
@@ -1109,19 +1126,8 @@ impl<I: Tokens> Parser<I> {
         if !matches!(token, Token::Await | Token::Yield) {
             return Ok(());
         }
-        // Keyword spellings are retained as token values by the lexer so that
-        // IdentifierName positions can accept escaped reserved words.
-        // Lookahead may leave lexer flags describing the next token, while
-        // the buffer preserves the current token's value.
-        let escaped = self.input().has_escaped_keyword();
-        if escaped && self.token_is_reserved(token) {
-            let span = self.input().cur_span();
-            return Err(Error::new(
-                span,
-                SyntaxError::EscapeInReservedWord {
-                    word: Atom::new(token.to_string()),
-                },
-            ));
+        if let Some(error) = self.escaped_keyword_error() {
+            return Err(error);
         }
 
         Ok(())

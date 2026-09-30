@@ -83,7 +83,9 @@ fn error(entry: PathBuf) {
     let is_module = entry
         .extension()
         .map(|ext| ext != "cjs")
-        .unwrap_or_default();
+        .unwrap_or_default()
+        // TypeScript Script fixtures exercise lexical container boundaries.
+        && !entry.to_string_lossy().ends_with(".script.ts");
 
     eprintln!(
         "\n\n========== Running error reporting test \nSource:\n{}\n",

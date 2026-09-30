@@ -59,6 +59,17 @@ impl<I: Tokens> Parser<I> {
         self.parse_ident_name()
     }
 
+    /// Declaration names also obey parser-owned contextual keyword
+    /// restrictions. Type-only names such as `infer` variables retain
+    /// lexical-only checking.
+    #[cfg(feature = "typescript")]
+    pub(super) fn parse_ts_binding_ident_name(&mut self) -> PResult<IdentName> {
+        if let Some(error) = self.escaped_keyword_error() {
+            self.input_mut().iter_mut().add_error(error);
+        }
+        self.parse_ident_name()
+    }
+
     pub(crate) fn parse_maybe_private_name(&mut self) -> PResult<Either<PrivateName, IdentName>> {
         let is_private = self.input().is(Token::Hash);
         if is_private {

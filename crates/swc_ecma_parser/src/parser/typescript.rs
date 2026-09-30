@@ -1463,7 +1463,7 @@ impl<I: Tokens> Parser<I> {
             };
         }
 
-        let name = self.in_type(Self::parse_ident_name_with_escape_check)?;
+        let name = self.in_type(Self::parse_ts_binding_ident_name)?;
         if self.syntax().flow() {
             self.emit_flow_reserved_type_name_error(name.span, &name.sym);
         }
@@ -2137,7 +2137,7 @@ impl<I: Tokens> Parser<I> {
             return self.parse_flow_enum_decl(start, is_const);
         }
 
-        let id = self.parse_ident_name_with_escape_check()?;
+        let id = self.parse_ts_binding_ident_name()?;
         expect!(self, Token::LBrace);
         let members =
             self.parse_ts_delimited_list(ParsingContext::EnumMembers, Self::parse_ts_enum_member)?;
@@ -3028,7 +3028,7 @@ impl<I: Tokens> Parser<I> {
     ) -> PResult<Box<TsTypeAliasDecl>> {
         debug_assert!(self.input().syntax().typescript());
 
-        let id = self.parse_ident_name_with_escape_check()?;
+        let id = self.parse_ts_binding_ident_name()?;
         if self.syntax().flow() {
             self.emit_flow_reserved_type_name_error(id.span, &id.sym);
         }
@@ -3066,7 +3066,7 @@ impl<I: Tokens> Parser<I> {
         debug_assert!(self.input().syntax().flow());
 
         expect!(self, Token::Type);
-        let id = self.parse_ident_name_with_escape_check()?;
+        let id = self.parse_ts_binding_ident_name()?;
         if self.syntax().flow() {
             self.emit_flow_reserved_type_name_error(id.span, &id.sym);
         }
@@ -4053,7 +4053,7 @@ impl<I: Tokens> Parser<I> {
     ) -> PResult<Box<TsInterfaceDecl>> {
         debug_assert!(self.input().syntax().typescript());
 
-        let id = self.parse_ident_name_with_escape_check()?;
+        let id = self.parse_ts_binding_ident_name()?;
         match &*id.sym {
             "string" | "null" | "number" | "object" | "any" | "unknown" | "boolean" | "bigint"
             | "symbol" | "void" | "never" | "intrinsic" => {
@@ -4283,7 +4283,7 @@ impl<I: Tokens> Parser<I> {
         let id = if nested {
             self.parse_ident_name()?
         } else {
-            self.parse_ident_name_with_escape_check()?
+            self.parse_ts_binding_ident_name()?
         };
         let body: TsNamespaceBody = if self.input_mut().eat(Token::Dot) {
             let inner_start = self.cur_pos();
