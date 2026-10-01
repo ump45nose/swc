@@ -65,6 +65,23 @@ test!(
 }"#
 );
 
+// Multiple labels nested on a single `for...of` must all stay together. Previously
+// the innermost label was kept inside the generated `try` block while the rest were
+// left outside it, so `break <inner label>` jumped out of the `try` without running
+// its `finally` block.
+test!(
+    syntax(),
+    |_| for_of(Default::default()),
+    issue_12433_repeated_labels,
+    r#"first:
+second:
+third:
+for (const item of arr) {
+  if (a) continue first;
+  if (b) break third;
+}"#
+);
+
 // for_of_as_array_for_of
 test!(
     syntax(),

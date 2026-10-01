@@ -2,7 +2,7 @@ use std::mem::take;
 
 use serde::Deserialize;
 use swc_atoms::atom;
-use swc_common::{util::take::Take, Mark, Spanned, SyntaxContext, DUMMY_SP};
+use swc_common::{util::take::Take, Mark, Span, Spanned, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_transforms_base::{
     helper,
@@ -76,7 +76,7 @@ struct ForOf {
 impl ForOf {
     fn fold_for_stmt(
         &mut self,
-        label: Option<Ident>,
+        labels: &[Ident],
         ForOfStmt {
             span,
             left,
@@ -206,15 +206,7 @@ impl ForOf {
             }
             .into();
 
-            return match label {
-                Some(label) => LabeledStmt {
-                    span,
-                    label,
-                    body: Box::new(stmt),
-                }
-                .into(),
-                _ => stmt,
-            };
+            return with_labels(span, labels, stmt);
         }
 
         // Loose mode
@@ -328,15 +320,7 @@ impl ForOf {
                 body: Box::new(Stmt::Block(body)),
             }
             .into();
-            return match label {
-                Some(label) => LabeledStmt {
-                    span,
-                    label,
-                    body: Box::new(stmt),
-                }
-                .into(),
-                _ => stmt,
-            };
+            return with_labels(span, labels, stmt);
         }
 
         let var_span = left.span();
@@ -498,15 +482,7 @@ impl ForOf {
         }
         .into();
 
-        let for_stmt = match label {
-            Some(label) => LabeledStmt {
-                span,
-                label,
-                body: Box::new(for_stmt),
-            }
-            .into(),
-            None => for_stmt,
-        };
+        let for_stmt = with_labels(span, labels, for_stmt);
 
         TryStmt {
             span: DUMMY_SP,
@@ -554,6 +530,27 @@ impl ForOf {
         }
         .into()
     }
+}
+
+/// Wraps `stmt` in the chain of labels that directly prefixed the original
+/// `for...of` loop, outermost first.
+///
+/// The labels are attached directly to the loop rather than to the generated
+/// `try` statement: `continue <label>` is only valid when the label names a
+/// loop, so hoisting the labels above the `try` would turn `continue` into a
+/// syntax error, and `break <label>` would skip the `finally` block that calls
+/// `_iterator.return()`.
+fn with_labels(span: Span, labels: &[Ident], stmt: Stmt) -> Stmt {
+    let mut stmt = stmt;
+    for label in labels.iter().rev() {
+        stmt = LabeledStmt {
+            span,
+            label: label.clone(),
+            body: Box::new(stmt),
+        }
+        .into();
+    }
+    stmt
 }
 
 /// ```js
@@ -697,22 +694,34 @@ impl VisitMut for ForOf {
     fn visit_mut_stmt(&mut self, s: &mut Stmt) {
         match s {
             Stmt::Labeled(LabeledStmt { label, body, .. }) => {
-                // Handle label
-                match &mut **body {
-                    Stmt::ForOf(stmt) => {
-                        stmt.visit_mut_children_with(self);
+                // Handle labels. A `for...of` may be prefixed by a chain of
+                // labels (`a: b: for (…) of …`), all of which name the loop.
+                // Collect the whole chain so `fold_for_stmt` can re-attach them
+                // inside the generated `try` block.
+                let mut labels = vec![label.clone()];
+                let mut inner = &mut **body;
+                while let Stmt::Labeled(LabeledStmt {
+                    label, body: next, ..
+                }) = inner
+                {
+                    labels.push(label.clone());
+                    inner = next;
+                }
 
-                        *s = self.fold_for_stmt(Some(label.clone()), stmt.take());
-                    }
-                    _ => {
-                        body.visit_mut_with(self);
-                    }
+                if let Stmt::ForOf(stmt) = inner {
+                    stmt.visit_mut_children_with(self);
+
+                    *s = self.fold_for_stmt(&labels, stmt.take());
+                } else {
+                    // Not a `for...of` loop, so the labels belong to some other
+                    // statement and are left where they are.
+                    s.visit_mut_children_with(self);
                 }
             }
             Stmt::ForOf(stmt) => {
                 stmt.visit_mut_children_with(self);
 
-                *s = self.fold_for_stmt(None, stmt.take())
+                *s = self.fold_for_stmt(&[], stmt.take())
             }
             _ => s.visit_mut_children_with(self),
         }
